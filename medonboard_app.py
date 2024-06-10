@@ -1,92 +1,166 @@
 import streamlit as st
+import mysql.connector
 import pandas as pd
+import hashlib
 
-# Sample datasets for demonstration
-medicine_data = pd.DataFrame({
-    'name': ['Paracetamol', 'Ibuprofen', 'Amoxicillin'],
-    'disease': ['Fever', 'Pain', 'Infection'],
-    'usage': ['Relieves pain and reduces fever', 'Reduces inflammation and pain',
-              'Antibiotic for bacterial infections'],
-    'dose': ['500mg every 4-6 hours', '200mg every 4-6 hours', '500mg every 8 hours'],
-    'disease_link': ['/diseases/fever', '/diseases/pain', '/diseases/infection']
-})
 
-disease_data = pd.DataFrame({
-    'name': ['Fever', 'Pain', 'Infection'],
-    'symptoms': ['High temperature', 'Discomfort and soreness', 'Bacterial growth'],
-    'treatment': ['Paracetamol, rest, and hydration', 'Ibuprofen and rest', 'Antibiotics like Amoxicillin'],
-    'medicine': ['Paracetamol', 'Ibuprofen', 'Amoxicillin'],
-    'medicine_link': ['/medicines/paracetamol', '/medicines/ibuprofen', '/medicines/amoxicillin']
-})
+# Database connection
+def create_connection():
+    return mysql.connector.connect(
+        host="127.0.0.1",
+        user="root",
+        password="blue0025",
+        database="medonboard"
+    )
 
-case_record_data = pd.DataFrame({
-    'id': [1, 2, 3],
-    'patient': ['John Doe', 'Jane Doe', 'Jim Beam'],
-    'disease': ['Fever', 'Pain', 'Infection'],
-    'medicine': ['Paracetamol', 'Ibuprofen', 'Amoxicillin'],
-    'notes': ['Fever due to flu', 'Chronic back pain', 'Bacterial infection'],
-    'disease_link': ['/diseases/fever', '/diseases/pain', '/diseases/infection']
-})
+
+# Function to hash passwords
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+# Check if username exists
+def is_username_taken(username, connection):
+    cursor = connection.cursor()
+    cursor.execute("SELECT COUNT(*) FROM users WHERE username = %s", (username,))
+    result = cursor.fetchone()
+    return result[0] > 0
+
+
+# Validate password
+def is_valid_password(password, name, username):
+    if len(password) < 8 or not any(char.isdigit() for char in password) or not any(
+            char.isalpha() for char in password):
+        return False
+    if name in password or username in password:
+        return False
+    return True
+
+
+# Initialize database
+def init_db(connection):
+    cursor = connection.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(100),
+            role VARCHAR(100),
+            user_type ENUM('normal', 'expert'),
+            username VARCHAR(100) UNIQUE,
+            password VARCHAR(255)
+        )
+    """)
+    connection.commit()
+    cursor.close()
+
+
+# Add preset users
+def add_preset_users(connection):
+    cursor = connection.cursor()
+    preset_users = [
+        ('Expert User', 'Expert', 'expert', 'expert', hash_password('hello1234')),
+        ('Normal User', 'User', 'normal', 'user', hash_password('hello1234'))
+    ]
+    for user in preset_users:
+        cursor.execute(
+            "INSERT IGNORE INTO users (name, role, user_type, username, password) VALUES (%s, %s, %s, %s, %s)", user)
+    connection.commit()
+    cursor.close()
 
 
 # Authentication function
-def authenticate(username, password, user_type):
-    users = {
-        'EXPERT': {'expert': 'hello1234'},
-        'USER': {'user': 'hello1234'}
-    }
-    return users.get(user_type, {}).get(username) == password
+def authenticate_user(username, password, connection):
+    cursor = connection.cursor()
+    cursor.execute("SELECT user_type FROM users WHERE username = %s AND password = %s",
+                   (username, hash_password(password)))
+    result = cursor.fetchone()
+    cursor.close()
+    if result:
+        return result[0]
+    return None
 
 
-# Check if user is authenticated
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
+# Streamlit application
+def main():
+    st.set_page_config(page_title="MedonBoard", layout="centered", initial_sidebar_state="collapsed")
+    connection = create_connection()
+    init_db(connection)
+    add_preset_users(connection)
 
-if not st.session_state.authenticated:
-    st.markdown("<h1 style='text-align: center;'>MedonBoard</h1>", unsafe_allow_html=True)
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
 
-    user_type = st.selectbox("Select User Type", ["EXPERT", "USER"])
+    if not st.session_state.authenticated:
+        st.markdown("# **MedonBoard**")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+
+        if st.button("Login"):
+            user_type = authenticate_user(username, password, connection)
+            if user_type:
+                st.session_state.authenticated = True
+                st.session_state.user_type = user_type
+                st.experimental_rerun()
+            else:
+                st.error("Invalid username or password")
+
+        if st.button("Create Account"):
+            create_account_page(connection)
+    else:
+        if st.session_state.user_type == 'normal':
+            normal_user_homepage()
+        elif st.session_state.user_type == 'expert':
+            expert_user_homepage()
+
+
+def create_account_page(connection):
+    st.markdown("# **Create Account**")
+    name = st.text_input("Name")
+    role = st.text_input("Role")
+    user_type = st.selectbox("User Type", ["normal", "expert"])
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        if authenticate(username, password, user_type):
-            st.session_state.authenticated = True
-            st.session_state.user_type = user_type
-            st.experimental_rerun()
-        else:
-            st.error("Invalid username or password")
-
-    if st.button("Create New User"):
-        st.session_state.show_registration = True
-        st.experimental_rerun()
-
-elif 'show_registration' in st.session_state and st.session_state.show_registration:
-    st.title("Create New User")
-
-    new_username = st.text_input("New Username")
-    new_email = st.text_input("Email")
-    new_password = st.text_input("New Password", type="password")
     confirm_password = st.text_input("Confirm Password", type="password")
-    new_user_type = st.selectbox("Select User Type", ["EXPERT", "USER"])
 
-    if st.button("Register"):
-        if new_password != confirm_password:
+    if st.button("Sign Up"):
+        if password != confirm_password:
             st.error("Passwords do not match")
-        elif len(new_password) < 8 or not any(char.isdigit() for char in new_password) or not any(
-                char.isalpha() for char in new_password):
-            st.error("Password must be at least 8 characters long and include both numbers and alphabets")
-        elif new_username in users[new_user_type]:
+        elif is_username_taken(username, connection):
             st.error("Username already taken")
+        elif not is_valid_password(password, name, username):
+            st.error("Password does not meet criteria")
         else:
-            users[new_user_type][new_username] = new_password
-            st.success("User registered successfully")
-            st.session_state.show_registration = False
-            st.experimental_rerun()
-else:
+            cursor = connection.cursor()
+            cursor.execute("INSERT INTO users (name, role, user_type, username, password) VALUES (%s, %s, %s, %s, %s)",
+                           (name, role, user_type, username, hash_password(password)))
+            connection.commit()
+            cursor.close()
+            st.success("Account created successfully")
+
+
+def normal_user_homepage():
+    st.markdown("# **Normal User Homepage**")
+    st.markdown("Welcome to the MedonBoard!")
+    navigation()
+
+
+def expert_user_homepage():
+    st.markdown("# **Expert User Homepage**")
+    normal_user_homepage()
+    st.markdown("### Edit Data")
+    st.write("Functionality for expert users to edit data")
+
+
+def navigation():
     # Set up the navigation
     st.sidebar.title("Navigation")
     page = st.sidebar.radio("Go to", ["Medicines", "Diseases", "Case Records"])
+
+    # Fetch data from database
+    connection = create_connection()
+    medicine_data = pd.read_sql("SELECT * FROM medicines", connection)
+    disease_data = pd.read_sql("SELECT * FROM diseases", connection)
+    case_record_data = pd.read_sql("SELECT * FROM case_records", connection)
 
     if page == "Medicines":
         st.title("Medicines")
@@ -107,6 +181,7 @@ else:
                 st.write(f"**Disease:** [{row['disease']}]({row['disease_link']})")
                 st.write(f"**Usage:** {row['usage']}")
                 st.write(f"**Dose:** {row['dose']}")
+
     elif page == "Diseases":
         st.title("Diseases")
 
@@ -126,6 +201,7 @@ else:
                 st.write(f"**Symptoms:** {row['symptoms']}")
                 st.write(f"**Treatment:** {row['treatment']}")
                 st.write(f"**Medicine:** [{row['medicine']}]({row['medicine_link']})")
+
     elif page == "Case Records":
         st.title("Case Records")
 
@@ -147,3 +223,7 @@ else:
     if st.sidebar.button("Logout"):
         st.session_state.authenticated = False
         st.experimental_rerun()
+
+
+if __name__ == "__main__":
+    main()
