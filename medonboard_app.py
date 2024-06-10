@@ -1,160 +1,149 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
-import hashlib
 
+# Sample datasets for demonstration
+medicine_data = pd.DataFrame({
+    'name': ['Paracetamol', 'Ibuprofen', 'Amoxicillin'],
+    'disease': ['Fever', 'Pain', 'Infection'],
+    'usage': ['Relieves pain and reduces fever', 'Reduces inflammation and pain',
+              'Antibiotic for bacterial infections'],
+    'dose': ['500mg every 4-6 hours', '200mg every 4-6 hours', '500mg every 8 hours'],
+    'disease_link': ['/diseases/fever', '/diseases/pain', '/diseases/infection']
+})
 
-# Initialize SQLite database connection
-def create_connection():
-    conn = sqlite3.connect('medonboard.db')
-    return conn
+disease_data = pd.DataFrame({
+    'name': ['Fever', 'Pain', 'Infection'],
+    'symptoms': ['High temperature', 'Discomfort and soreness', 'Bacterial growth'],
+    'treatment': ['Paracetamol, rest, and hydration', 'Ibuprofen and rest', 'Antibiotics like Amoxicillin'],
+    'medicine': ['Paracetamol', 'Ibuprofen', 'Amoxicillin'],
+    'medicine_link': ['/medicines/paracetamol', '/medicines/ibuprofen', '/medicines/amoxicillin']
+})
 
-
-# Function to hash passwords
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-
-# Check if username exists
-def is_username_taken(username, connection):
-    cursor = connection.cursor()
-    cursor.execute("SELECT COUNT(*) FROM users WHERE username = ?", (username,))
-    result = cursor.fetchone()
-    return result[0] > 0
-
-
-# Validate password
-def is_valid_password(password, name, username):
-    if len(password) < 8 or not any(char.isdigit() for char in password) or not any(
-            char.isalpha() for char in password):
-        return False
-    if name in password or username in password:
-        return False
-    return True
-
-
-# Initialize database
-def init_db(connection):
-    cursor = connection.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            role TEXT,
-            user_type TEXT,
-            username TEXT UNIQUE,
-            password TEXT
-        )
-    """)
-    connection.commit()
-    cursor.close()
-
-
-# Add preset users
-def add_preset_users(connection):
-    cursor = connection.cursor()
-    preset_users = [
-        ('Expert User', 'Expert', 'expert', 'expert', hash_password('hello1234')),
-        ('Normal User', 'User', 'normal', 'user', hash_password('hello1234'))
-    ]
-    for user in preset_users:
-        cursor.execute("INSERT OR IGNORE INTO users (name, role, user_type, username, password) VALUES (?, ?, ?, ?, ?)",
-                       user)
-    connection.commit()
-    cursor.close()
+case_record_data = pd.DataFrame({
+    'id': [1, 2, 3],
+    'patient': ['John Doe', 'Jane Doe', 'Jim Beam'],
+    'disease': ['Fever', 'Pain', 'Infection'],
+    'medicine': ['Paracetamol', 'Ibuprofen', 'Amoxicillin'],
+    'notes': ['Fever due to flu', 'Chronic back pain', 'Bacterial infection'],
+    'disease_link': ['/diseases/fever', '/diseases/pain', '/diseases/infection']
+})
 
 
 # Authentication function
-def authenticate_user(username, password, connection):
-    cursor = connection.cursor()
-    cursor.execute("SELECT user_type FROM users WHERE username = ? AND password = ?",
-                   (username, hash_password(password)))
-    result = cursor.fetchone()
-    cursor.close()
-    if result:
-        return result[0]
-    return None
+def authenticate(username, password, user_type):
+    users = {
+        'EXPERT': {'expert': 'hello1234'},
+        'USER': {'user': 'hello1234'}
+    }
+    return users.get(user_type, {}).get(username) == password
 
 
-# Streamlit application
-def main():
-    st.set_page_config(page_title="MedonBoard", layout="centered", initial_sidebar_state="collapsed")
-    connection = create_connection()
-    init_db(connection)
-    add_preset_users(connection)
+# Check if user is authenticated
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
 
-    st.markdown("# **MedonBoard**")
+if not st.session_state.authenticated:
+    st.markdown("<h1 style='text-align: center;'>MedonBoard</h1>", unsafe_allow_html=True)
+
+    user_type = st.selectbox("Select User Type", ["EXPERT", "USER"])
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
     if st.button("Login"):
-        user_type = authenticate_user(username, password, connection)
-        if user_type:
-            if user_type == 'normal':
-                normal_user_homepage()
-            elif user_type == 'expert':
-                expert_user_homepage()
+        if authenticate(username, password, user_type):
+            st.session_state.authenticated = True
+            st.session_state.user_type = user_type
+            st.experimental_rerun()
         else:
             st.error("Invalid username or password")
 
-    if st.button("Create Account"):
-        create_account_page(connection)
+    if st.button("Create New User"):
+        st.session_state.show_registration = True
+        st.experimental_rerun()
 
+elif 'show_registration' in st.session_state and st.session_state.show_registration:
+    st.title("Create New User")
 
-def create_account_page(connection):
-    st.markdown("# **Create Account**")
-    name = st.text_input("Name")
-    role = st.text_input("Role")
-    user_type = st.selectbox("User Type", ["normal", "expert"])
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    new_username = st.text_input("New Username")
+    new_email = st.text_input("Email")
+    new_password = st.text_input("New Password", type="password")
     confirm_password = st.text_input("Confirm Password", type="password")
+    new_user_type = st.selectbox("Select User Type", ["EXPERT", "USER"])
 
-    if st.button("Sign Up"):
-        if password != confirm_password:
+    if st.button("Register"):
+        if new_password != confirm_password:
             st.error("Passwords do not match")
-        elif is_username_taken(username, connection):
+        elif len(new_password) < 8 or not any(char.isdigit() for char in new_password) or not any(
+                char.isalpha() for char in new_password):
+            st.error("Password must be at least 8 characters long and include both numbers and alphabets")
+        elif new_username in users[new_user_type]:
             st.error("Username already taken")
-        elif not is_valid_password(password, name, username):
-            st.error("Password does not meet criteria")
         else:
-            cursor = connection.cursor()
-            cursor.execute("INSERT INTO users (name, role, user_type, username, password) VALUES (?, ?, ?, ?, ?)",
-                           (name, role, user_type, username, hash_password(password)))
-            connection.commit()
-            cursor.close()
-            st.success("Account created successfully")
+            users[new_user_type][new_username] = new_password
+            st.success("User registered successfully")
+            st.session_state.show_registration = False
+            st.experimental_rerun()
+else:
+    # Set up the navigation
+    st.sidebar.title("Navigation")
+    page = st.sidebar.radio("Go to", ["Medicines", "Diseases", "Case Records"])
 
+    if page == "Medicines":
+        st.title("Medicines")
 
-def normal_user_homepage():
-    st.markdown("# **Normal User Homepage**")
-    st.markdown("Welcome to the MedonBoard!")
-    st.sidebar.markdown("## Categories")
-    options = ["Medicine", "Diseases", "Case Records"]
-    category = st.sidebar.selectbox("Select a category", options)
-    if category == "Medicine":
-        st.markdown("### Medicine")
-        # Add Medicine page content
-    elif category == "Diseases":
-        st.markdown("### Diseases")
-        # Add Diseases page content
-    elif category == "Case Records":
-        st.markdown("### Case Records")
-        # Add Case Records page content
-    st.sidebar.markdown("## Search")
-    query = st.sidebar.text_input("Search for keywords")
-    if st.sidebar.button("Search"):
-        st.write(f"Search results for '{query}'")
-        # Add search functionality
+        # Alphabet filter
+        alphabet = st.selectbox("Filter by Alphabet", [chr(i) for i in range(ord('A'), ord('Z') + 1)])
+        filtered_medicines = medicine_data[medicine_data['name'].str.startswith(alphabet)]
 
+        # Search bar
+        search_query = st.text_input("Search Medicines")
+        if search_query:
+            filtered_medicines = filtered_medicines[filtered_medicines['name'].str.contains(search_query, case=False)]
 
-def expert_user_homepage():
-    st.markdown("# **Expert User Homepage**")
-    normal_user_homepage()
-    st.markdown("### Edit Data")
-    st.write("Functionality for expert users to edit data")
-    # Add functionality to edit data
+        # Display list of medicines
+        for index, row in filtered_medicines.iterrows():
+            if st.button(row['name']):
+                st.write(f"**Name:** {row['name']}")
+                st.write(f"**Disease:** [{row['disease']}]({row['disease_link']})")
+                st.write(f"**Usage:** {row['usage']}")
+                st.write(f"**Dose:** {row['dose']}")
+    elif page == "Diseases":
+        st.title("Diseases")
 
+        # Alphabet filter
+        alphabet = st.selectbox("Filter by Alphabet", [chr(i) for i in range(ord('A'), ord('Z') + 1)])
+        filtered_diseases = disease_data[disease_data['name'].str.startswith(alphabet)]
 
-if __name__ == "__main__":
-    main()
+        # Search bar
+        search_query = st.text_input("Search Diseases")
+        if search_query:
+            filtered_diseases = filtered_diseases[filtered_diseases['name'].str.contains(search_query, case=False)]
+
+        # Display list of diseases
+        for index, row in filtered_diseases.iterrows():
+            if st.button(row['name']):
+                st.write(f"**Name:** {row['name']}")
+                st.write(f"**Symptoms:** {row['symptoms']}")
+                st.write(f"**Treatment:** {row['treatment']}")
+                st.write(f"**Medicine:** [{row['medicine']}]({row['medicine_link']})")
+    elif page == "Case Records":
+        st.title("Case Records")
+
+        # Search bar
+        search_query = st.text_input("Search Case Records by Patient Name")
+        filtered_cases = case_record_data
+        if search_query:
+            filtered_cases = filtered_cases[filtered_cases['patient'].str.contains(search_query, case=False)]
+
+        # Display list of case records
+        for index, row in filtered_cases.iterrows():
+            if st.button(f"Case {row['id']} - {row['patient']}"):
+                st.write(f"**Patient:** {row['patient']}")
+                st.write(f"**Disease:** [{row['disease']}]({row['disease_link']})")
+                st.write(f"**Medicine:** {row['medicine']}")
+                st.write(f"**Notes:** {row['notes']}")
+
+    # Logout button
+    if st.sidebar.button("Logout"):
+        st.session_state.authenticated = False
+        st.experimental_rerun()
